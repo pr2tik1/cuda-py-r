@@ -1,22 +1,14 @@
 FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-inference:2.1.0-gpu-py310-cu118-ubuntu20.04-sagemaker
 
-# Set shell to bash with pipefail
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Arguments for user and group
 ARG NB_USER="sagemaker-user"
 ARG NB_UID="1000"
 ARG NB_GID="100"
-
-# Set environment variables
 ENV NB_USER=$NB_USER \
     NB_UID=$NB_UID \
     NB_GID=$NB_GID \
     HOME=/home/$NB_USER
-
-# Switch to root user for installation
 USER root
-
 RUN set -e && \
     apt-get update && apt-get install --assume-yes --no-install-recommends \
     ca-certificates dirmngr dpkg-dev gcc gnupg libbz2-dev \
@@ -30,26 +22,46 @@ RUN set -e && \
     liblapack-dev libblas-dev libfreetype6-dev libxft-dev libjpeg-dev \
     && \
     apt-get install -y --no-install-recommends \
-    r-base \
     git && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set the environment variable for CUDA
+# Create the necessary directory for GPG
+RUN mkdir -p /home/sagemaker-user/.gnupg && chown -R $NB_UID:$NB_GID /home/sagemaker-user/.gnupg
+RUN echo "deb https://cloud.r-project.org/bin/linux/ubuntu focal-cran40/" >> /etc/apt/sources.list && \
+    gpg --keyserver keyserver.ubuntu.com --recv-key 51716619E084DAB9 && \
+    gpg -a --export 51716619E084DAB9 | apt-key add - && \
+    apt-get update && \
+    apt-get install -y r-base
+
+COPY install_r_packages.sh /tmp/install_r_packages.sh
+RUN chmod +x /tmp/install_r_packages.sh && /tmp/install_r_packages.sh
+
 ENV PATH=/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
 
-# Install R packages using Bash script
-COPY install_r_packages.sh /tmp/install_r_packages.sh
-RUN chmod +x /tmp/install_r_packages.sh && /tmp/install_r_packages.sh
-RUN R --quiet -e "IRkernel::installspec(name='ir', user = FALSE)"
+WORKDIR /usr/src/python
+RUN wget https://www.python.org/ftp/python/3.10.0/Python-3.10.0.tgz && \
+    tar xzf Python-3.10.0.tgz && \
+    cd Python-3.10.0 && \
+    ./configure --enable-shared && \
+    make && \
+    make install
 
-# Install Python packages and clone DeepMSI repository
+WORKDIR /
+RUN rm -rf /usr/src/python
+ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.10 1
+
 COPY requirements.txt /srv/requirements.txt
 RUN apt-get update && apt-get install --yes --no-install-recommends \
     libfreetype6-dev libxft-dev libpng-dev && \
-    pip install -r /srv/requirements.txt && \
-    git clone https://github.com/DanGuo1223/DeepMSI.git /home/$NB_USER/DeepMSI
+    pip install -r /srv/requirements.txt jupyter && \
+    git clone https://github.com/DanGuo1223/DeepMSI.git /home/$NB_USER/DeepMSI && \
+    cd /home/$NB_USER/DeepMSI && \
+    pip install .
 
-# Switch back to the non-root user and set the working directory
-USER $NB_UID
-WORKDIR $HOME
+RUN R --quiet -e "IRkernel::installspec(name='ir', user = FALSE)"
+
+RUN useradd --non-unique --create-home --shell /bin/bash --gid "100" --uid 1000 "sagemaker-user"
+WORKDIR /home/sagemaker-user
+USER 1000

@@ -10,7 +10,8 @@ R -e 'renv::install(c("devtools",
                         "tidymodels",
                         "ggplot2", 
                         "scales", 
-                        "BiocManager"), repos="https://cloud.r-project.org/")'
+                        "BiocManager",
+                        "sp"), repos="https://cloud.r-project.org/")'
 
 R -e 'BiocManager::install(c("EBImage", "Cardinal"), dependencies=TRUE)'
-R -e 'devtools::install_github("DanGuo1223/CardinalNN")'
+R -e 'devtools::install_github("DanGuo1223/CardinalNN", dependencies=TRUE)'
